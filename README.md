@@ -24,6 +24,15 @@ was used with minor changes by WD1010 and WD2010 hard disk controller
 chips, the IBM PC/AT disk controller, and later, with more substantial
 changes, by the ATA (IDE) disk interface.
 
+## Status
+
+The assembler syntax used does not match any existing 8X300 assembler,
+including Signetics MCCAP.  This assembly source code has not been
+assembled for verification against the actual WD1000 PROM chips.
+
+The source code was originally derived from a disassembly produced by
+[s8x30x](https://github.com/brouhaha/s8x30x).
+
 ## License information
 
 This program is free software: you can redistribute it and/or modify
