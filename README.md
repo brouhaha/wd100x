@@ -13,11 +13,12 @@ They supported up to four drives with the ST506 interface (5.25-inch)
 or SA1000 interface (8-inch).
 
 The original WD1000 used CRC error detection, and had a hard-coded
-sector size of 128, 256, or 512 bytes, and changing the sector size
-required a PROM change.
+sector size of 128, 256, or 512 bytes.  The early 512-word firmware
+did not support configurable sector size, but later 1024-word firmware
+did.
 
-The later WD1001 used 32-bit ECC on the sector data fields, and the
-sector size was configurable over the host interface.
+The later WD1001 used 32-bit ECC on the sector data fields, and supported
+configurable sector size.
 
 The WD1000 host interface had a "task file" of eight registers, which
 was used with minor changes by WD1010 and WD2010 hard disk controller
