@@ -1,5 +1,6 @@
 ; WD1000 hard disk controller firmware reverse-engineered source code
-; 512-word version
+; 1024-word version, with dynamic sector size support
+; from a Radio Shack 5.25-inch Winchester controller
 
 ; Assembly source code copyright 2016 Eric Smith <spacewar@gmail.com>
 
@@ -23,15 +24,6 @@
 ; assembler, including Signetics MCCAP.	 This assembly source code
 ; has not been assembled for verification against the actual WD1000
 ; PROM chips.
-
-
-; WD1000 PROMs (512x8):
-;    U41 800000-036A most significant byte
-;    U51 800000-035A least significant byte
-;    U28 800000-037A fast I/O select
-
-; This firmware is hard-coded for a single sector size; changing
-; the sector size required installing different firmware.
 
 
 ; Fast I/O select ports
@@ -108,7 +100,7 @@ main_loop_set_drq:
 main_loop:
 	nzt	rd2[4],main_loop	; loop until CSAC
 	xec	task_file_access,rd2[3:0]	; dispatch on /HRW, /HA2../HA0
-	jmp	main_loop		
+	jmp	main_loop
 
 task_file_access:
 	; host reads task file:
@@ -131,7 +123,6 @@ task_file_access:
 	jmp	host_wr_tf_precomp	; tf1: precomp
 	jmp	host_wr_tf_data		; tf0: data
 
-
 data_xfer_done:
 	xmit	95h,mac_control
 	move	aux,r11
@@ -144,16 +135,15 @@ data_xfer_done:
 
 	xmit	command_byte & 0ffh,ram_addr_low
 	move	rd_ram[4],aux		; was it a read sector command?
-	nzt	aux,x0080		; no, so perform command
+	nzt	aux,x0083		; no, so perform command
 
-	; was a read command, so it's now done
+	; was a read command, so now it's done
 	xmit	command_byte & 0ffh,ram_addr_low
 	xmit	10h,aux
 	and	r11,aux
 	nzt	rd_ram[4:3],$+2		; check DMA mode bit
 	jmp	reset_buffer_pointer	; programmed I/O, so no int
 	jmp	int_and_reset_data_pointer	; DMA done, so int
-
 
 reset:	xmit	95h,mac_control
 	xmit	77h,drive_head_sel
@@ -176,8 +166,7 @@ x002a:	xmit	0h,wr_ram
 	xmit	0h,r4	; initial cylinder high
 	xmit	0h,r5	; initial size/drive/head
 
-clear_err_reg_and_reset_data_pointer:
-	xmit	0h,r6
+	xmit	0h,r6	; clear error register
 	xmit	0h,aux
 	jmp	reset_buffer_pointer
 
@@ -202,7 +191,7 @@ host_wr_tf_data:
 host_wr_tf_sdh:
 	move	rd_host_port,r5
 
-	xmit	7h,aux		; get head select bits of SDH
+	xmit	7h,aux		; get head selct bits of SDH
 	and	r5,r11
 
 	xmit	3h,aux		; get drive select bits of SDH
@@ -213,7 +202,6 @@ host_wr_tf_sdh:
 	xmit	0h,aux
 	jmp	main_loop
 
-; table of drive_had_sel register values for drive n, head 7
 drive_sel_table:
 	xmit	77h,aux
 	xmit	6fh,aux
@@ -253,7 +241,6 @@ x005e:	xmit	4h,r6
 	jmp	x0061
 
 
-
 bad_block:
 	xmit	80h,r6		; set bad block detect error
 
@@ -263,7 +250,7 @@ x0061:	xmit	command_byte & 0ffh,ram_addr_low
 	move	rd_ram,r1
 	nzt	aux,x0068
 	xmit	90h,aux
-	jmp	x0117
+	jmp	x012c
 
 x0068:	xmit	10h,aux
 	jmp	int_and_reset_data_pointer
@@ -272,7 +259,9 @@ x0068:	xmit	10h,aux
 cmd_seek:
 	xmit	1h,r11	; call seek_save_step_rate, r11 specifies return loc
 	jmp	seek_save_step_rate
-x006c:	xmit	0h,aux
+clear_err_reg_and_reset_data_pointer:
+	xmit	0h,aux
+	xmit	0h,r6	; clear error reg
 
 int_and_reset_data_pointer:
 	nzt	int_clk,$+1	; set interrupt
@@ -280,7 +269,7 @@ int_and_reset_data_pointer:
 ; sets data pointer back to beginning of buffer
 reset_buffer_pointer:
 	xmit	0h,ram_addr_low
-	xmit	97h,mac_control	; 256-byte
+	xmit	96h,mac_control	; 512-byte
 	jmp	main_loop
 
 
@@ -291,33 +280,38 @@ cmd_restore:
 	xmit	0h,wr_ram
 	xmit	0h,r3
 	xmit	0h,r4
-	xmit	2h,r11		; call seek_save_step_rate, r11 specifies return loc
+	xmit	2h,r11	; call seek_save_step_rate, r11 specifies return loc
 	jmp	seek_save_step_rate
-x0079:	move	rd5[3],aux	; check track 0
-	nzt	aux,x006c
+x007a:	move	rd5[3],aux	; check track 0
+	nzt	aux,clear_err_reg_and_reset_data_pointer
 	xmit	2h,r6		; set error register for TR000 error
 	jmp	x0068
 
 
-x007d:	jmp	cmd_read_write
+	jmp	x0080		; unused
+	nop	 // rd=0	; unused
+
+
+x0080:	jmp	cmd_format_track
+
 
 cmd_read_write:
 	xmit	command_byte & 0ffh,ram_addr_low
-	nzt	rd_ram[4],x007d		; write command?
+	nzt	rd_ram[4],x0080		; write command?
 
-x0080:	xmit	auto_restore_ok & 0ffh,ram_addr_low	; mark that no auto restore has been done
+x0083:	xmit	auto_restore_ok & 0ffh,ram_addr_low	; mark that no auto restore has been done
 	xmit	0ffh,wr_ram
 
 do_read_write_retry:
 	xmit	3h,r11		; call seek, r11 specifies return loc
 	jmp	seek
-x0084:	xmit	18*2,r1		; max 18 index pulses
+x0087:	xmit	18*2,r1		; max 18 pulses
 	xmit	0h,r6		; no error
-x0086:	xmit	91h,mac_control
+x0089:	xmit	91h,mac_control
 	xmit	81h,mac_control
 	xmit	0feh,aux	; ID mark byte for cyl 0-255, also used for counter
 
-x0089:	nzt	rd5[0],read_write_no_index	; check INDEX
+x008c:	nzt	rd5[0],read_write_no_index	; check INDEX
 	xmit	0h,reset_index	; clear index
 	add	r1,r1		; count down index pulses
 	nzt	r1,read_write_no_index
@@ -325,79 +319,77 @@ x0089:	nzt	rd5[0],read_write_no_index	; check INDEX
 
 read_write_no_index:
 	nzt	rd5[2],$+2	; check DRUN
-	jmp	x0089
-	
+	jmp	x008c
+
 	xmit	18h,r11
-x0091:	nzt	rd5[1],$+2	; check HFRQ
-	jmp	x0086
+x0094:	nzt	rd5[1],$+2	; check HFRQ
+	jmp	x0089
 
 	add	r11,r11
-	nzt	r11,x0091
+	nzt	r11,x0094
 	xmit	0eh,r11
 	xmit	09h,mac_control
 	nzt	rd_serdes,$+1
 
-	xmit	id_field_s_h_bb & 0ffh,ram_addr_low	; set up to save ID field sec size, head,bad block flag
+	xmit	id_field_s_h_bb,ram_addr_low	; set up to save ID field sec size, head, bad block flag
 
-	nzt	rd5[1],$		; wait for HFRQ
+	nzt	rd5[1],$	; wait for HFRQ
 	xmit	01h,mac_control
-x009b:	add	r11,r11
+	jmp	x00a0
+
+	nop	 // rd=0	; unused
+
+x00a0:	add	r11,r11
 	nzt	r11,$+2
-	jmp	x0086
+	jmp	x0089
 
 ; check ID field mark byte and cylinder high
-	nzt	rd2[6],x009b		; bdone
+	nzt	rd2[6],x00a0	; bdone
 	xor	r4,aux
 	xor	rd_serdes,aux
-	nzt	aux,x0086
+	nzt	aux,x0089
 
 ; check ID field cylinder low
 	move	r3,aux
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$	; wait for bdone
 	xor	rd_serdes,aux
-	nzt	aux,x0086
+	nzt	aux,x0089
 
 ; check ID field sector size and head number
 	xmit	67h,aux
 	and	r5,aux
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$	; wait for bdone
 	move	rd_serdes,wr_ram
 	xor	rd_serdes[6:0],aux
-	nzt	aux,x0086
+	nzt	aux,x0089
 
 ; check ID field sector number
 	move	r2,aux
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$	; wait for bdone
 	xor	rd_serdes,aux
-	nzt	aux,x0086
+	nzt	aux,x0089
 
 	xmit	drive_3_cylinder_high & 0ffh,aux	; point to drive's current cyl
 	and	r5,ram_addr_low
 
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$	; wait for bdone
 	nzt	rd_serdes,$+1
 	move	rd_ram[9:2],aux
 	xor	rd_ram[7:2],r11
 
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$	; wait for bdone
 	nzt	rd_serdes,$+1
 	xmit	0ffh,aux
 	xor	r11,aux
 	xmit	precomp & 0ffh,ram_addr_low
 
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$	; wait for bdone
 	xmit	91h,mac_control
-	jmp	x00c0
 
-
-	nop	 // rd=0	; unused
-	nop	 // rd=0	; unused
-
-
-x00c0:	nzt	rd2[5],id_field_crc_error	; check CRCOK
+	nzt	rd2[5],id_field_crc_error	; check CRCOK
 	add	rd_ram,aux
 	xmit	id_field_s_h_bb & 0ffh,ram_addr_low
-	move	rd_ram[7],aux		; get bad block flag (MSB of ID field sector size/head byte)
+	move	rd_ram[7],aux		;  get back block flag (MSB of ID field sector size/head byte)
 	nzt	aux,bad_block
 
 	xmit	command_byte & 0ffh,ram_addr_low
@@ -406,108 +398,136 @@ x00c0:	nzt	rd2[5],id_field_crc_error	; check CRCOK
 
 
 id_field_crc_error:
-	xmit	0dfh,aux	; turn on 20h bit of error reg for ID CRC err
+	xmit	0dfh,aux	; turn on 20h bit of error reg of ID CRC err
 	and	r6,r6
 	xmit	20h,aux
 	xor	r6,r6
-	jmp	x0086
+	jmp	x0089
 
 
 write_sector:
 	xmit	0ch,aux
-	xor	ovf<<<1,aux		; control RWC (bit 1)
+	xor	ovf>>>7,aux	; control RWC (bit 1)
 	xmit	0h,wr_serdes
-	xmit	0bbh,mac_control
+	xmit	0b9h,mac_control
 	move	aux,drive_control
 
 ; write ten bytes of 00h
 	xmit	0ffh,aux
 	xmit	0ah,r11
-x00d4:	nzt	rd2[6],$		; wait for bdone
+x00d6:	nzt	rd2[6],$	; wait for bdone
 	xmit	0h,wr_serdes
 	add	r11,r11
-	nzt	r11,x00d4
+	nzt	r11,x00d6
 
 ; write data address mark
-	xmit	0b3h,mac_control	; change to 0b2h for 512-byte sect
-	nzt	rd2[6],$		; wait for bdone
+	xmit	0b1h,mac_control
+	nzt	rd2[6],$	; wait for bdone
 	xmit	0a1h,wr_serdes
 
-	nzt	rd2[6],$		; wait for bdone
+	xmit	3h,aux		; set RAM buffer address low from table
+	and	r5>>>5,aux
+	xec	wr_ram_buffer_addr_low_table,aux
+
+	nzt	rd2[6],$	; wait for bdone
 	xmit	0f8h,wr_serdes
 
-	xmit	0h,ram_addr_low		; change to 80h for 128-byte sect
-	jmp	x00e0
+	xec	wr_ram_buffer_addr_high_table,aux	; set RAM addr high (and MAC control) from table
 
-
-	nop	 // rd=0	; unused
-
-
-; write data content of data field
-x00e0:	nzt	rd2[7],x00e4		; if RVOF, done writing data
+; write content of data field
+x00e3:	nzt	rd2[7],x00e7		; if RVOF, done writing data
 	nzt	rd2[6],$		; wait for bdone
 	move	rd_ram,wr_serdes
-	jmp	x00e0
+	jmp	x00e3
 
-x00e4:	nzt	rd2[6],$		; wait for bdone
+x00e7:	nzt	rd2[6],$		; wait for bdone
 	xmit	0h,wr_serdes
 	xmit	0f1h,mac_control
 	xmit	5h,r11
-x00e8:	nzt	rd2[6],$		; wait for bdone
+	xmit	0ffh,aux
+x00ec:	nzt	rd2[6],$		; wait for bdone
 	xmit	0h,wr_serdes
 	add	r11,r11
-	nzt	r11,x00e8
+	nzt	r11,x00ec
 	xmit	0fh,drive_control
 
-	xmit	saved_sector_count & 0ffh,ram_addr_low	; restore count from RAM
+	xmit	saved_sector_count & 0ffh,ram_addr_low
 	move	rd_ram,r1
 
-	jmp	x006c
+	jmp	clear_err_reg_and_reset_data_pointer
+
+
+wr_ram_buffer_addr_low_table:
+	xmit	0h,ram_addr_low
+	xmit	0h,ram_addr_low
+	xmit	0h,ram_addr_low
+	xmit	80h,ram_addr_low
+
+wr_ram_buffer_addr_high_table:
+	xmit	0b3h,mac_control
+	xmit	0b2h,mac_control
+	xmit	0b2h,mac_control
+	xmit	0b3h,mac_control
 
 
 read_sector:
-	xmit	0f8h,aux		; delay
+	xmit	0f8h,aux	; delay
 	xmit	50h,r11
 	add	r11,r11
 	nzt	r11,$-1
 
-	xmit	8bh,mac_control
+	xmit	89h,mac_control
 	xmit	0a0h,r11
 	add	r11,r11
 	nzt	r11,$-1
-	xmit	0bh,mac_control
-
-	xmit	18h,r11			; delay
+	xmit	09h,mac_control
+	
+	xmit	18h,r11		; delay
 	add	r11,r11
 	nzt	r11,$-1
 
 	xmit	78h,r11
-	xmit	3h,mac_control	; change to 02h for 512-byte sectors?
+	xmit	3h,aux
+	and	r5>>>5,aux
+	xec	rd_ram_buffer_addr_high_table,aux
+	xec	fmt_ram_buffer_addr_low_table,aux
+	xmit	0f8h,aux
 	nzt	rd_serdes,$+1
-	jmp	x0107
+	jmp	x011b
 
 
-x0100:	add	r11,r11
-	nzt	r11,x0107
+rd_ram_buffer_addr_high_table:
+	xmit	3h,mac_control
+	xmit	2h,mac_control
+	xmit	2h,mac_control
+	xmit	3h,mac_control
 
-x0102:	xmit	0feh,aux	; turn on 01h bit in status reg for DAM not found
+
+x0114:	add	r11,r11
+	nzt	r11,x011b
+
+x0116:	xmit	0feh,aux	; turn on 01h bit in status reg for DAM not found
 	and	r6,r6
 	xmit	1h,aux
 	xor	r6,r6
-	jmp	x0086
+	jmp	x0089
 
-x0107:	nzt	rd2[6],x0100		; bdone
+x011b:	nzt	rd2[6],x0114		; bdone
 	xor	rd_serdes,aux
-	nzt	aux,x0102
-	xmit	0h,ram_addr_low		; change to 80h for 128-byte sectors
+	nzt	aux,x0116
+	jmp	read_sector_data
+
+
+	nop	 // rd=0	; not used
+
 
 read_sector_data:
-	nzt	rd2[7],x010f		; if RVOF, done reading sector data
+	nzt	rd2[7],x0124		; if ROVF, done reading sector data
 	nzt	rd2[6],$		; wait for bdone
 	move	rd_serdes,wr_ram
 	jmp	read_sector_data
 
-x010f:	nzt	rd2[6],$		; wait for bdone
+x0124:	nzt	rd2[6],$		; wait for bdone
 	nzt	rd_serdes,$+1
 
 	nzt	rd2[6],$		; wait for bdone
@@ -520,41 +540,51 @@ x010f:	nzt	rd2[6],$		; wait for bdone
 cmd_format_track:
 	xmit	95h,mac_control
 	xmit	80h,aux
-x0117:	xmit	command_byte & 0ffh,ram_addr_low
+x012c:	xmit	command_byte & 0ffh,ram_addr_low
 	nzt	rd_ram[4:3],$+2
 	nzt	int_clk,$+1
 	move	rd_ram,r1
-	xmit	97h,mac_control
-	xmit	0h,ram_addr_low
+	move	aux,r11
+
+	xmit	3h,aux
+	and	r5>>>5,aux
+	xec	fmt_ram_buffer_addr_low_table,aux
+
+	xec	fmt1_ram_buffer_addr_high_table,aux
+	move	r11,aux
 	jmp	main_loop_set_drq
 
 
 read_sector_crc_error:
-	xmit	0bfh,aux	; turn on 40h bit in error reg for data CRC err
-	and	r6,r6
-	xmit	40h,aux
-	xor	r6,r6
-	jmp	x0086
+	xmit	40h,r6		; data CRC err bit in error reg
+	jmp	x0089
+
+
+fmt1_ram_buffer_addr_high_table:
+	xmit	97h,mac_control
+	xmit	96h,mac_control
+	xmit	96h,mac_control
+	xmit	97h,mac_control
 
 
 read_write_too_many_index:
 	xmit	40h,aux		; already have data field CRC error?
 	and	r6,aux
-	nzt	aux,x012f	; yes, report that
+	nzt	aux,x0149	; yes, report that
 
 	xmit	1h,aux		; already have DAM not found error?
 	and	r6,aux
-	nzt	aux,x012f	; yes, report that
+	nzt	aux,x0149	; yes, report that
 
 	xmit	20h,aux		; already have ID field CRC error?
 	and	r6,aux
-	nzt	aux,x012f	; yes, report that
+	nzt	aux,x0149	; yes, report that
 
 	xmit	auto_restore_ok & 0ffh,ram_addr_low ; has auto-restore retry been done?
 	nzt	rd_ram,auto_restore_retry
 
 	xmit	10h,aux		; write 10h to error reg for ID not found
-x012f:	move	aux,r6
+x0149:	move	aux,r6
 	jmp	x0061
 
 
@@ -563,32 +593,43 @@ x_do_read_write_retry:
 
 
 auto_restore_retry:
-	xmit	auto_restore_ok & 0ffh,ram_addr_low	; mark that we've done an auto-restore
+	xmit	auto_restore_ok & 0ffh,ram_addr_low	; mark that we've done auto-restore
 	xmit	0h,wr_ram
-
 	xmit	drive_3_cyl_high & 0ffh,aux
 	and	r5,ram_addr_low
 	xmit	0h,wr_ram
 	xmit	0h,wr_ram
 	xmit	0fh,drive_control	; set dir inward, step not active
 
-x0139:	nzt	rd5[3],x_do_read_write_retry	; if track 0, now retry read/write command
-
-	xmit	0bh,drive_control	; set dir inward, set step
+x0153:	nzt	rd5[3],x_do_read_write_retry	; if track 0, now retry read/write command
+	xmit	0bh,drive_control	; set dir inward, set setp
 
 	xmit	28h,r1
 	add	r1,r1
 	nzt	r1,$-1
 
 	xmit	0fh,drive_control	; set dir inward, clear step
-x013f:	nzt	rd5[4],x0139		; test seek complete
-	jmp	x013f
+x0159:	nzt	rd5[4],x0153		; test seek complete
+	jmp	x0159
+
+
+fmt_ram_buffer_addr_low_table:
+	xmit	0h,ram_addr_low
+	xmit	0h,ram_addr_low
+	xmit	0h,ram_addr_low
+	xmit	80h,ram_addr_low
+
+fmt2_ram_buffer_addr_high_table:
+	xmit	0b3h,r6
+	xmit	0b2h,r6
+	xmit	0b2h,r6
+	xmit	0b3h,r6
 
 
 format_track:
 	xmit	4h,r11		; call seek, r11 specifies return loc
 	jmp	seek
-x0143:	xmit	drive_3_cylinder_high & 0ffh,aux
+x0165:	xmit	drive_3_cylinder_high & 0ffh,aux
 	and	r5,ram_addr_low
 	move	rd_ram[9:2],aux
 	xor	rd_ram[7:2],r11
@@ -598,31 +639,41 @@ x0143:	xmit	drive_3_cylinder_high & 0ffh,aux
 	add	rd_ram,aux
 	xmit	0ch,aux
 	xor	ovf<<<1,aux
-	xmit	0bbh,mac_control
+	xmit	0b9h,mac_control
 	xmit	0h,reset_index
-	xmit	0h,ram_addr_low
 	move	aux,drive_control
 
-	nzt	rd5[0],$		; wait for index
+	xmit	3h,aux
+	and	r5>>>5,aux
+	xec	fmt_ram_buffer_addr_low_table,aux
+	xec	fmt2_ram_buffer_addr_high_table,aux
+
+	nzt	rd5[0],$	; wait for index
 
 format_sector:
-; write gap 3, 15 bytes of 4e
-	xmit	0ffh,aux
+; write gap 3, 15 or 30 bytes of 4e
+	xmit	1h,aux
+	add	r5>>>5,r11
+	and	r11>>>1,aux
+	xmit	1eh,r11
+	nzt	aux,x017d
+
 	xmit	0fh,r11
-x0154:	nzt	rd2[6],$		; wait for bdone
+x017d:	xmit	0ffh,aux
+x017e:	nzt	rd2[6],$	; wait for bdone
 	xmit	4eh,wr_serdes
 	add	r11,r11
-	nzt	r11,x0154
+	nzt	r11,x017e
 
-; write 14 bvtes of 00
+; write 14 bytes of 00
 	xmit	0eh,r11
-	xmit	0bbh,mac_control
-x015a:	nzt	rd2[6],$		; wait for bdone
+	xmit	0b9h,mac_control
+x0184:	nzt	rd2[6],$		; wait for bdone
 	xmit	0h,wr_serdes
 	add	r11,r11
-	nzt	r11,x015a
+	nzt	r11,x0184
 
-	xmit	0b3h,mac_control
+	move	r6,mac_control
 	nzt	rd2[6],$		; wait for bdone
 
 	xmit	0a1h,wr_serdes
@@ -640,37 +691,42 @@ x015a:	nzt	rd2[6],$		; wait for bdone
 
 	xmit	4h,r11
 	xmit	0ffh,aux
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$
 
 	move	rd_ram,wr_serdes
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$
 
 ; write 4 bytes of zeros after ID field
-	xmit	0f3h,mac_control
-x0170:	nzt	rd2[6],$		; wait for bdone
+	xmit	0f1h,mac_control
+x019a:	nzt	rd2[6],$		; wait for bdone
 	xmit	0h,wr_serdes
 	add	r11,r11
-	nzt	r11,x0170
-	xmit	0b3h,mac_control
+	nzt	r11,x019a
+	xmit	0b1h,mac_control
 
 ; write 13 bytes of zeros before data field
 	xmit	0dh,r11
-x0176:	nzt	rd2[6],$		; wait for bdone
+x01a0:	nzt	rd2[6],$		; wait for bdone
 	xmit	0h,wr_serdes
 	add	r11,r11
-	nzt	r11,x0176
+	nzt	r11,x01a0
 
-	xmit	0bbh,mac_control	; pulse CRC initialization
-	xmit	0b3h,mac_control
+	xmit	0b9h,mac_control	; pulse CRC initialization
+	xmit	0b1h,mac_control
 
 ; write Data AM
 	nzt	rd2[6],$		; wait for bdone
 	xmit	0a1h,wr_serdes
+	xmit	3h,aux
+	and	r5>>>5,aux
 	xmit	0h,reset_index
 
-	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$
 	xmit	0f8h,wr_serdes
 	xmit	80h,r11
+
+	xec	fmt3_sec_size_table,aux
+	xmit	0ffh,aux
 
 fmt_write_sector_data:
 	nzt	rd2[6],$		; wait for bdone
@@ -684,13 +740,13 @@ fmt_write_sector_data:
 
 ; write two bytes of CRC, 3 bytes of zeros
 	xmit	5h,r11
-	nzt	rd2[6],$		; wait for bdone
-	xmit	0f3h,mac_control
-x018b:	nzt	rd2[6],$		; wait for bdone
+	nzt	rd2[6],$		; wiat for bdone
+	xmit	0f1h,mac_control
+x01b9:	nzt	rd2[6],$		; wait for bdone
 	xmit	0h,wr_serdes
 	add	r11,r11
-	nzt	r11,x018b
-	
+	nzt	r11,x01b9
+
 	add	r1,r1			; more sectors to format?
 	nzt	r1,format_sector
 
@@ -701,7 +757,14 @@ x018b:	nzt	rd2[6],$		; wait for bdone
 	jmp	clear_err_reg_and_reset_data_pointer
 
 
-	nop	 // rd=0
+fmt3_sec_size_table:
+	xmit	80h,r11
+	xmit	0h,r11
+	xmit	0h,r11
+	xmit	40h,r11
+
+
+	org	200h
 
 
 ; on entry here, r6 contains the command byte
@@ -713,7 +776,7 @@ seek:	xmit	80h,wr_host_port
 	xmit	91h,mac_control
 	xmit	5h,aux
 	xor	rd5[6:4],aux
-	nzt	aux,x01fa
+	nzt	aux,x0264
 
 ; save task file registers for scratch use
 	xmit	seek_save_sector,ram_addr_low
@@ -731,14 +794,14 @@ seek:	xmit	80h,wr_host_port
 	move	r3,wr_ram
 
 	xmit	0h,r6
-x01a9:	xmit	0ffh,aux
+x0213:	xmit	0ffh,aux
 	xor	r1,r1
 	xor	r2,r2
 	xmit	1h,aux
 	add	r1,r1
 	move	ovf,aux
 	add	r2,r2
-	nzt	r6,x01bd
+	nzt	r6,x0227
 	move	r3,aux
 	add	r1,r1
 	move	ovf,aux
@@ -750,58 +813,58 @@ x01a9:	xmit	0ffh,aux
 	xor	r5,r5
 	move	r5,drive_control
 	xmit	1h,r6
-	nzt	aux,x01a9
-x01bd:	nzt	r1,x01d7
-	nzt	r2,x01d7
+	nzt	aux,x0213
+x0227:	nzt	r1,x0241
+	nzt	r2,x0241
 
-x01bf:
+x0229:
 ; restore saved task file registers
 	xmit	seek_save_sector & 0ffh,ram_addr_low
 	move	rd_ram,r2
 	move	rd_ram,r1
 	move	rd_ram,r5
 
-; was the command a seek?
+; was the command a seek
 	xmit	command_byte & 0ffh,ram_addr_low
 	xmit	7h,aux
 	xor	rd_ram[6:4],r6
 	nzt	r6,$+2
-	jmp	x01d0
+	jmp	x023a
 
 ; not a seek command
 	xmit	80h,r6
 	xmit	0ffh,aux
-x01ca:	xmit	0h,reset_index
+x0234:	xmit	0h,reset_index
 
-	nzt	rd5[4],x01d0	; check seek complete
+	nzt	rd5[4],x023a	; check seek complete
 	nzt	rd5[0],$-1	; check index
 
 	add	r6,r6
-	nzt	r6,x01ca
+	nzt	r6,x0234
 	jmp	x005e
 
 
 ; command was seek
-x01d0:	xmit	2h,aux
+x023a:	xmit	2h,aux
 	xor	rd5[6:5],aux
-	nzt	aux,x01fa
+	nzt	aux,x0264
 	jmp	seek_return
 
 
-	jmp	x01bf
+	jmp	x0229
 
-x01d5:	nzt	rd5[3],$-1
-	jmp	x01da
+x023f:	nzt	rd5[3],$-1
+	jmp	x0244
 
-x01d7:	xmit	8h,aux
+x0241:	xmit	8h,aux
 	and	r5,aux
-	nzt	aux,x01d5
-x01da:	xmit	0ffh,aux
+	nzt	aux,x023f
+x0244:	xmit	0ffh,aux
 	add	r1,r1
 	add	ovf,aux
 	add	r2,r2
 
-; save registers for actual stepping sequence
+; save registers for actual stepping squence
 	xmit	seek_temp_1 & 0ffh,ram_addr_low
 	move	r2,wr_ram
 	move	r3,wr_ram
@@ -821,19 +884,19 @@ x01da:	xmit	0ffh,aux
 
 	move	r5,drive_control	; turn off step bit
 
-x01eb:	nzt	r2,$+2		; pulse count = 0?
+x0255:	nzt	r2,$+2		; pulse count = 0?
 	jmp	step_pulses_done
 
-	add	r2,r2		; pulse count -= 1
+	add	r2,r2
 	xmit	4h,r4
 
-x01ef:	xmit	0f8h,r3		; delay
+x0259:	xmit	0f8h,r3		; delay
 	add	r3,r3
 	nzt	r3,$-1
 
 	add	r4,r4
-	nzt	r4,x01ef
-	jmp	x01eb
+	nzt	r4,x0259
+	jmp	x0255
 
 
 step_pulses_done:
@@ -842,16 +905,16 @@ step_pulses_done:
 	move	rd_ram,r2
 	move	rd_ram,r3
 	move	rd_ram,r4
-	jmp	x01bd
+	jmp	x0227
 
 
-x01fa:	jmp	x005e
+x0264:	jmp	x005e
 
 
 ; return to caller, r11 specifies return loc
 seek_return:
-	xec	x01fb,r11
-	jmp	x006c		; 1
-	jmp	x0079		; 2
-	jmp	x0084		; 3
-	jmp	x0143		; 4
+	xec	x0265,r11
+	jmp	clear_err_reg_and_reset_data_pointer // wr=7	; 1
+	jmp	x007a // wr=7	; 2
+	jmp	x0087 // wr=7	; 3
+	jmp	x0165 // wr=7	; 4
