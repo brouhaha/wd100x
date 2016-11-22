@@ -145,6 +145,7 @@ data_xfer_done:
 	jmp	reset_buffer_pointer	; programmed I/O, so no int
 	jmp	int_and_reset_data_pointer	; DMA done, so int
 
+
 reset:	xmit	95h,mac_control
 	xmit	77h,drive_head_sel
 	xmit	0fh,drive_control
@@ -224,7 +225,7 @@ host_wr_tf_cmd:
 	xmit	command_byte & 0ffh,ram_addr_low
 	move	r6,wr_ram
 
-	move	r1,wr_ram		; save count in RAM
+	move	r1,wr_ram		; save sector count in RAM
 
 	xmit	command_byte & 0ffh,ram_addr_low
 
@@ -267,6 +268,7 @@ int_and_reset_data_pointer:
 	nzt	int_clk,$+1	; set interrupt
 
 ; sets data pointer back to beginning of buffer
+; BUG - always sets for 512-byte buffer
 reset_buffer_pointer:
 	xmit	0h,ram_addr_low
 	xmit	96h,mac_control	; 512-byte

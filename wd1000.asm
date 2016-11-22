@@ -236,7 +236,7 @@ host_wr_tf_cmd:
 	xmit	command_byte & 0ffh,ram_addr_low
 	move	r6,wr_ram
 
-	move	r1,wr_ram		; save count in RAM
+	move	r1,wr_ram		; save sector count in RAM
 
 	xmit	command_byte & 0ffh,ram_addr_low
 
