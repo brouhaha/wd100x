@@ -15,10 +15,13 @@ or SA1000 interface (8-inch).
 The original WD1000 was 8X300-based, used CRC error detection, and had
 a hard-coded sector size of 128, 256, or 512 bytes.  The early
 512-word firmware did not support configurable sector size, but later
-1024-word firmware did.
+1024-word firmware did.  Some later WD1000 boards used the 8X305, but
+the firmware does not take advantage of the 8X305 enhancements.
 
 The later WD1001 was 8X305-based, used 32-bit ECC on the sector data
-fields, and supported configurable sector size.
+fields, and supported configurable sector size.  The WD1001 firmware
+does not take advantage of the 8X305 enhancements, so substituting an
+8X300 should work just as well.
 
 The WD1000 host interface had a "task file" of eight registers, which
 was used with minor changes by WD1010 and WD2010 hard disk controller
