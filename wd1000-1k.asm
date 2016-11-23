@@ -34,7 +34,7 @@
 rd_ram		riv	rr=0
 drq_clk		liv	rr=1
 rd2		liv	rr=2
-drq_clk		liv	rr=3
+int_clk		liv	rr=3
 rd_serdes	liv	rr=4
 rd5		liv	rr=5
 rd_host_port	liv	rr=6
@@ -361,7 +361,7 @@ x00a0:	add	r11,r11
 	xmit	67h,aux
 	and	r5,aux
 	nzt	rd2[6],$	; wait for bdone
-	move	rd_serdes,wr_ram
+	move	rd_serdes,wr_ram	; save ID field sec size, head, bad block flag
 	xor	rd_serdes[6:0],aux
 	nzt	aux,x0089
 
@@ -391,7 +391,7 @@ x00a0:	add	r11,r11
 	nzt	rd2[5],id_field_crc_error	; check CRCOK
 	add	rd_ram,aux
 	xmit	id_field_s_h_bb & 0ffh,ram_addr_low
-	move	rd_ram[7],aux		;  get back block flag (MSB of ID field sector size/head byte)
+	move	rd_ram[7],aux		;  get bad block flag (MSB of ID field sector size/head byte)
 	nzt	aux,bad_block
 
 	xmit	command_byte & 0ffh,ram_addr_low
@@ -400,7 +400,7 @@ x00a0:	add	r11,r11
 
 
 id_field_crc_error:
-	xmit	0dfh,aux	; turn on 20h bit of error reg of ID CRC err
+	xmit	0dfh,aux	; turn on 20h bit of error reg for ID CRC err
 	and	r6,r6
 	xmit	20h,aux
 	xor	r6,r6
@@ -473,15 +473,18 @@ wr_ram_buffer_addr_high_table:
 
 
 read_sector:
-	xmit	0f8h,aux	; delay
-	xmit	50h,r11
+	xmit	0f8h,aux
+
+	xmit	50h,r11		; delay
 	add	r11,r11
 	nzt	r11,$-1
 
 	xmit	89h,mac_control
-	xmit	0a0h,r11
+
+	xmit	0a0h,r11	; delay
 	add	r11,r11
 	nzt	r11,$-1
+
 	xmit	09h,mac_control
 	
 	xmit	18h,r11		; delay
@@ -597,10 +600,12 @@ x_do_read_write_retry:
 auto_restore_retry:
 	xmit	auto_restore_ok & 0ffh,ram_addr_low	; mark that we've done auto-restore
 	xmit	0h,wr_ram
+
 	xmit	drive_3_cyl_high & 0ffh,aux
 	and	r5,ram_addr_low
 	xmit	0h,wr_ram
 	xmit	0h,wr_ram
+
 	xmit	0fh,drive_control	; set dir inward, step not active
 
 x0153:	nzt	rd5[3],x_do_read_write_retry	; if track 0, now retry read/write command
@@ -774,7 +779,7 @@ seek_save_step_rate:
 	xmit	step_rate & 0ffh,ram_addr_low
 	move	r6,wr_ram
 
-seek:	xmit	80h,wr_host_port
+seek:	xmit	80h,wr_host_port	; set status = busy
 	xmit	91h,mac_control
 	xmit	5h,aux
 	xor	rd5[6:4],aux

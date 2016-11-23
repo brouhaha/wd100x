@@ -42,7 +42,7 @@
 rd_ram		riv	rr=0
 drq_clk		liv	rr=1
 rd2		liv	rr=2
-drq_clk		liv	rr=3
+int_clk		liv	rr=3
 rd_serdes	liv	rr=4
 rd5		liv	rr=5
 rd_host_port	liv	rr=6
@@ -361,7 +361,7 @@ x009b:	add	r11,r11
 	xmit	67h,aux
 	and	r5,aux
 	nzt	rd2[6],$		; wait for bdone
-	move	rd_serdes,wr_ram
+	move	rd_serdes,wr_ram	; save ID field sec size, head, bad block flag
 	xor	rd_serdes[6:0],aux
 	nzt	aux,x0086
 
@@ -466,15 +466,18 @@ x00e8:	nzt	rd2[6],$		; wait for bdone
 
 
 read_sector:
-	xmit	0f8h,aux		; delay
-	xmit	50h,r11
+	xmit	0f8h,aux
+
+	xmit	50h,r11		; delay
 	add	r11,r11
 	nzt	r11,$-1
 
 	xmit	8bh,mac_control
+
 	xmit	0a0h,r11
 	add	r11,r11
 	nzt	r11,$-1
+
 	xmit	0bh,mac_control
 
 	xmit	18h,r11			; delay
@@ -709,7 +712,7 @@ seek_save_step_rate:
 	xmit	step_rate & 0ffh,ram_addr_low
 	move	r6,wr_ram
 
-seek:	xmit	80h,wr_host_port
+seek:	xmit	80h,wr_host_port	; set status = busy
 	xmit	91h,mac_control
 	xmit	5h,aux
 	xor	rd5[6:4],aux
