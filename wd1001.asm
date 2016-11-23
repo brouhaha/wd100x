@@ -52,44 +52,35 @@ mac_control	liv	wr=0xf
 ; address byte from the 8X305 form bits 9..8 of the RAM address.
 ; Bits 1..0 of the RAM address are hardwired.
 
+; Because of the address mapping, only addresses that are a multiple
+; of four are directly accessible.
+
 ; controller tracks current cylinder for each drive
 drive_0_cylinder_high	equ	000h
 drive_1_cylinder_high	equ	008h
 drive_2_cylinder_high	equ	010h
 drive_3_cylinder_high	equ	018h
 
-buffer_512		equ	002h	; 200h
-
-?			equ	000h
-?			equ	068h
+unk_000			equ	000h
+unk_068			equ	068h
 syndrome		equ	06ch
-?			equ	070h
+unk_070			equ	070h
 auto_restore_ok		equ	074h	; 0ffh if auto restore not done yet, 0 if it has
-precomp			equ	078h
-step_rate		equ	07ch
+precomp			equ	078h	; reset initializes to 20h
+step_rate		equ	07ch	; reset initializes to 0fh
 command_byte		equ	090h
-seek_save_regs		equ	0a0h
-seek_save_regs_2	equ	0b0h
+save_regs		equ	0a0h
+save_regs_2		equ	0b0h
 
+buffer_512		equ	002h	; hw 200h through 3ffh
+buffer_512_long		equ	0fdh	; hw 1fch through 3ffh
 
+buffer_256		equ	003h	; hw 300h through 3ffh
+buffer_256_long		equ	0feh	; hw 2fch through 3ffh
 
-;seek_temp_1		equ	1e0h
-;seek_temp_2		equ	1e1h
-;seek_temp_3		equ	1e2h
+buffer_128		equ	083h	; hw 380h through 3ffh
+buffer_128_long		equ	07fh	; hw 37ch through 3ffh
 
-;seek_save_sector	equ	1e7h
-;seek_save_sector_count	equ	1e8h
-;seek_save_sdh		equ	1e9h
-
-;saved_sector_count	equ	1f0h
-;id_field_s_h_bb		equ	1f1h
-
-;
-;unk_1f8			equ	1f8h	; unkown, reset initializes to 20h
-
-;data_buffer		equ	300h	; for 256 byte sectors
-					; use 380h for 128 byte sectors
-					; use 200h for 512 byte sectors
 
 	org	0
 
@@ -165,7 +156,7 @@ x001a:  move    aux,r11
         add     r1,r1
         nzt     r1,multiple_next	; sector count is zero? if no, do next
 
-x002e:  xmit    68h,ram_addr
+x002e:  xmit    unk_068,ram_addr
         move    r11,aux
         xor     rd_ram,aux
         xmit    command_byte,ram_addr
@@ -176,13 +167,13 @@ x0034:  jmp     int_and_reset_data_pointer	; DMA done, so int
 
 reset:  xmit    90h,mac_control
         xmit    0efh,drive_head_sel
-        xmit    0h,ram_addr
+        xmit    unk_000,ram_addr
 x0038:  xmit    0h,wr_ram
         nzt     rd2[7],x003b
         jmp     x0038
 x003b:  xmit    step_rate,ram_addr
         xmit    0fh,wr_ram
-        xmit    unk_078,ram_addr
+        xmit    precomp,ram_addr
         xmit    20h,wr_ram
         xmit    1h,r1
         xmit    0h,r2
@@ -234,7 +225,7 @@ host_wr_tf_precomp:
 
 host_wr_tf_cmd:  move    rd_host_port,r6
 x0060:  nzt     rd2[3],x0060
-        xmit    68h,ram_addr
+        xmit    unk_068,ram_addr
         xmit    0h,wr_ram
         xmit    command_byte,ram_addr
         move    r6,wr_ram
@@ -347,7 +338,7 @@ x00aa:  nzt     rd5[1],$+2	; check HFRQ
         xmit    0h,mac_control
         nzt     rd_serdes,$+1
 
-	xmit    seek_save_regs,ram_addr	; set up to save ID field sec size, head, bad block flag
+	xmit    save_regs,ram_addr	; set up to save ID field sec size, head, bad block flag
 x00b3:  nzt     rd5[0],x00b5	; check INDEX
         jmp     x0096
 x00b5:  nzt     rd5[1],x00b3	; check HFRQ
@@ -410,19 +401,19 @@ id_field_crc_error:
 
 
 buf_addr_table_1:
-	xmit    3h,ram_addr	; 256-byte		300
-        xmit    0feh,ram_addr	; 256-byte, long	2fc
-        xmit    2h,ram_addr	; 512-byte		200
-        xmit    0fdh,ram_addr	; 512-byte, long	1fc
-        xmit    2h,ram_addr	; 512-byte		200
-        xmit    0fdh,ram_addr	; 512-byte, long	1fc
-        xmit    83h,ram_addr	; 128-byte		380
-        xmit    7fh,ram_addr	; 128-byte, long	37c
+	xmit	buffer_256,ram_addr
+	xmit	buffer_256_long,ram_addr
+	xmit	buffer_512,ram_addr
+	xmit	buffer_512_long,ram_addr
+	xmit	buffer_512,ram_addr
+	xmit	buffer_512_long,ram_addr 
+	xmit	buffer_128,ram_addr
+	xmit	buffer_128_long,ram_addr
 
 
 x00e3:  xmit    90h,mac_control
         move    r5,ecc_sel		; bit 7 of SDH reg enables ECC
-        xmit    seek_save_regs,ram_addr
+        xmit    save_regs,ram_addr
         move    rd_ram[7],aux		; get bad block flag (MSB of ID field sector size/head byte)
         nzt     aux,bad_block
 
@@ -569,7 +560,7 @@ x0151:  jmp     read_sector_ecc_error
 
 
 cmd_format_track:
-	xmit    68h,ram_addr
+	xmit    unk_068,ram_addr
         xmit    0h,wr_ram
 
 x0154:  xmit    80h,r11
@@ -578,7 +569,7 @@ x0156:  xmit    command_byte,ram_addr
         nzt     rd_ram[4:3],x0159
         nzt     int_clk,x0159
 x0159:  move    rd_ram,r1
-        xmit    68h,ram_addr
+        xmit    unk_068,ram_addr
         xor     rd_ram,r11
         xmit    command_byte,ram_addr
         xmit    6h,aux
@@ -591,14 +582,14 @@ x0159:  move    rd_ram,r1
 
 
 buf_addr_table_2:
-	xmit    3h,ram_addr	; 256-byte		300
-        xmit    0feh,ram_addr	; 256-byte, long	2fc
-        xmit    2h,ram_addr	; 512-byte		200
-        xmit    0fdh,ram_addr	; 512-byte, long	1fc
-        xmit    2h,ram_addr	; 512-byte		200
-        xmit    0fdh,ram_addr	; 512-byte, long	1fc
-        xmit    83h,ram_addr	; 128-byte		380
-        xmit    7fh,ram_addr	; 128-byte, long	37c
+	xmit	buffer_256,ram_addr
+	xmit	buffer_256_long,ram_addr
+	xmit	buffer_512,ram_addr
+	xmit	buffer_512_long,ram_addr
+	xmit	buffer_512,ram_addr
+	xmit	buffer_512_long,ram_addr 
+	xmit	buffer_128,ram_addr
+	xmit	buffer_128_long,ram_addr
 
 
 read_write_too_many_index:
@@ -778,13 +769,13 @@ read_sector_ecc_error:
 
 correct_read_data:
 ; save r1..r4
-	xmit    seek_save_regs,ram_addr
+	xmit    save_regs,ram_addr
         move    r1,wr_ram
         move    r2,wr_ram
         move    r3,wr_ram
         move    r4,wr_ram
 
-        xmit    70h,ram_addr
+        xmit    unk_070,ram_addr
         xmit    3h,aux
         and     r5>>>5,aux
         xmit    7h,wr_ram
@@ -802,12 +793,12 @@ correct_read_data:
         xmit    0h,r11
 x020e:  nzt     r1,x0220
 
-        xmit    70h,ram_addr
+        xmit    unk_070,ram_addr
         xmit    8h,aux
         add     rd_ram,aux
         move    rd_ram,r6
 
-        xmit    70h,ram_addr
+        xmit    unk_070,ram_addr
         move    aux,wr_ram
         move    ovf,aux
         add     r6,wr_ram
@@ -826,7 +817,7 @@ x021c:  xmit    8h,wr_ram
 
 
 ; rotate register by one bit
-x0220:  xmit    0b0h,ram_addr
+x0220:  xmit    save_regs_2,ram_addr
         xmit    80h,aux
         and     r1>>>1,wr_ram
         and     r2>>>1,wr_ram
@@ -839,7 +830,7 @@ x0220:  xmit    0b0h,ram_addr
         and     r3>>>1,r3
         and     r4>>>1,r4
 
-        xmit    0b0h,ram_addr
+        xmit    save_regs_2,ram_addr
         move    rd_ram,aux
         xor     r2,r2
         move    rd_ram,aux
@@ -962,7 +953,7 @@ ecc_correction_failed:
 
 x0282:
 ; restore r1..r4
-	xmit    seek_save_regs,ram_addr
+	xmit    save_regs,ram_addr
         move    rd_ram,r1
         move    rd_ram,r2
         move    rd_ram,r3
@@ -984,7 +975,7 @@ seek:	xmit    80h,wr_host_port	; set status = busy
         xor     rd5[6:4],aux
         nzt     aux,x02ca
 
-        xmit    seek_save_regs,ram_addr
+        xmit    save_regs,ram_addr
         move    r2,wr_ram
         move    r1,wr_ram
         move    r5,wr_ram
@@ -1033,7 +1024,7 @@ x02b8:  nzt     r1,x02d2
 
 x02ba:
 ; restore saved task file registers
-	xmit    seek_save_regs,ram_addr
+	xmit    save_regs,ram_addr
         move    rd_ram,r2
         move    rd_ram,r1
         move    rd_ram,r5
@@ -1074,7 +1065,7 @@ x02d3:  xmit    0ffh,aux
         add     r2,r2
 
 ; save registers for actual stepping sequence
-        xmit    seek_save_regs_2,ram_addr
+        xmit    save_regs_2,ram_addr
         move    r2,wr_ram
         move    r3,wr_ram
         move    r4,wr_ram
@@ -1111,7 +1102,7 @@ x02eb:  add     r3,r3
 
 step_pulses_done:
 ; restore registers used in stepping sequence
-	xmit    seek_save_regs_2,ram_addr
+	xmit    save_regs_2,ram_addr
         move    rd_ram,r2
         move    rd_ram,r3
         move    rd_ram,r4
