@@ -1080,7 +1080,7 @@ x02d3:  xmit    0ffh,aux
 	add     r4,r4
         nzt     r4,$-1
 
-        xmit    0ffh,step	; turn off setp bit
+        xmit    0ffh,step	; turn off step bit
 
         xmit    16h,r4		; delay
 	add     r4,r4
