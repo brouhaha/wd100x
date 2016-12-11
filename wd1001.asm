@@ -1128,7 +1128,7 @@ x02f8:  nzt     r6,$+2
 
 ; subroutine return based on value in r11
 subroutine_return:
-	xec     x0300,r11
+	xec     $,r11
 
 ; return values 1..4 are used for seek subroutine
         jmp     clear_err_reg_and_reset_data_pointer	; 1

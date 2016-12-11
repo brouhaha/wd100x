@@ -853,7 +853,7 @@ x01fa:	jmp	x005e
 
 ; return to caller, r11 specifies return loc
 seek_return:
-	xec	x01fb,r11
+	xec	$,r11
 	jmp	x006c		; 1
 	jmp	x0079		; 2
 	jmp	x0084		; 3
